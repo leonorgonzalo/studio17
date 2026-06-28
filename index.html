@@ -1,0 +1,476 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Studio17 — Reserva tu cita</title>
+  <meta name="description" content="Reserva tu cita en Studio17. Manicura, pedicura, cejas y más en Sevilla.">
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+<header class="site-header">
+  <a href="index.html" class="site-logo">STUDIO<span>17</span></a>
+  <a href="admin/index.html" class="btn btn-outline btn-sm">Panel admin</a>
+</header>
+
+<section class="hero">
+  <div class="hero-line"></div>
+  <h1>Reserva tu cita</h1>
+  <p>Elige tu servicio, selecciona el día y el hueco que mejor te venga.</p>
+</section>
+
+<main class="section">
+  <!-- STEPS INDICATOR -->
+  <div class="steps">
+    <div class="step active" id="step-ind-1">1. Servicio</div>
+    <div class="step" id="step-ind-2">2. Fecha y hora</div>
+    <div class="step" id="step-ind-3">3. Tus datos</div>
+    <div class="step" id="step-ind-4">4. Confirmación</div>
+  </div>
+
+  <!-- STEP 1: ELEGIR SERVICIO -->
+  <div id="step-1">
+    <h2 class="section-title">¿Qué servicio deseas?</h2>
+    <p class="section-sub">Selecciona un servicio para ver la duración y el precio.</p>
+    <div id="services-container">
+      <div class="loading"><div class="spinner"></div> Cargando servicios…</div>
+    </div>
+    <div class="step-nav">
+      <div></div>
+      <button class="btn btn-primary" id="btn-to-step2" disabled onclick="goToStep2()">
+        Elegir fecha →
+      </button>
+    </div>
+  </div>
+
+  <!-- STEP 2: ELEGIR FECHA Y HORA -->
+  <div id="step-2" style="display:none">
+    <h2 class="section-title">Elige fecha y hora</h2>
+    <p class="section-sub" id="step2-sub">Selecciona un día disponible.</p>
+
+    <!-- Calendario -->
+    <div class="calendar-nav">
+      <button class="btn btn-dark btn-sm" onclick="prevMonth()">← Anterior</button>
+      <span class="calendar-month" id="calendar-month-label"></span>
+      <button class="btn btn-dark btn-sm" onclick="nextMonth()">Siguiente →</button>
+    </div>
+
+    <div class="calendar-grid" id="calendar-grid"></div>
+
+    <!-- Slots -->
+    <div id="slots-section" style="display:none">
+      <p class="slots-title" id="slots-date-title"></p>
+      <div id="slots-container"></div>
+    </div>
+
+    <div class="step-nav">
+      <button class="btn btn-outline" onclick="goToStep(1)">← Volver</button>
+      <button class="btn btn-primary" id="btn-to-step3" disabled onclick="goToStep3()">
+        Mis datos →
+      </button>
+    </div>
+  </div>
+
+  <!-- STEP 3: DATOS CLIENTE -->
+  <div id="step-3" style="display:none">
+    <h2 class="section-title">Tus datos</h2>
+    <p class="section-sub">Rellena tus datos para completar la reserva.</p>
+
+    <!-- Resumen -->
+    <div class="booking-summary" id="summary-box"></div>
+
+    <div id="form-msg"></div>
+
+    <div class="form-group">
+      <label class="form-label" for="client-name">Nombre completo</label>
+      <input class="form-input" type="text" id="client-name" placeholder="Tu nombre" autocomplete="name">
+    </div>
+
+    <div class="form-group">
+      <label class="form-label" for="client-phone">Teléfono (WhatsApp)</label>
+      <input class="form-input" type="tel" id="client-phone" placeholder="666 123 456" autocomplete="tel">
+    </div>
+
+    <div class="form-group">
+      <label class="form-label" for="client-notes">Notas (opcional)</label>
+      <input class="form-input" type="text" id="client-notes" placeholder="¿Algo que deba saber Leonor?">
+    </div>
+
+    <div class="step-nav">
+      <button class="btn btn-outline" onclick="goToStep(2)">← Volver</button>
+      <button class="btn btn-primary" id="btn-confirm" onclick="confirmBooking()">
+        Confirmar reserva →
+      </button>
+    </div>
+  </div>
+
+  <!-- STEP 4: CONFIRMACIÓN -->
+  <div id="step-4" style="display:none">
+    <div class="success-box">
+      <div class="success-icon">✨</div>
+      <h2>¡Reserva confirmada!</h2>
+      <p id="success-text">Tu cita ha sido registrada. ¡Te esperamos!</p>
+      <button class="btn btn-primary" onclick="resetBooking()">Hacer otra reserva</button>
+    </div>
+  </div>
+</main>
+
+<footer class="site-footer">
+  <p>Studio17 · Manicura &amp; Pedicura · Sevilla</p>
+</footer>
+
+<script src="js/config.js"></script>
+<script src="js/availability.js"></script>
+<script>
+// ============================================
+// ESTADO GLOBAL
+// ============================================
+let state = {
+  selectedService: null,
+  selectedStaff: null,
+  selectedDate: null,
+  selectedSlot: null,
+  calYear: null,
+  calMonth: null,
+  staffList: []
+};
+
+// ============================================
+// INIT
+// ============================================
+document.addEventListener('DOMContentLoaded', async () => {
+  const now = new Date();
+  state.calYear = now.getFullYear();
+  state.calMonth = now.getMonth();
+
+  await loadStaff();
+  await loadServices();
+});
+
+async function loadStaff() {
+  const staff = await supabaseRequest('studio17_staff?active=eq.true&select=*');
+  state.staffList = staff;
+  // Por defecto seleccionamos el primero (Leonor)
+  if (staff.length) state.selectedStaff = staff[0];
+}
+
+// ============================================
+// STEP 1: SERVICIOS
+// ============================================
+async function loadServices() {
+  try {
+    const categories = await supabaseRequest('studio17_categories?select=*&order=sort_order');
+    const services = await supabaseRequest('studio17_services?active=eq.true&select=*&order=sort_order');
+
+    const container = document.getElementById('services-container');
+    container.innerHTML = '';
+
+    for (const cat of categories) {
+      const catServices = services.filter(s => s.category_id === cat.id);
+      if (!catServices.length) continue;
+
+      const block = document.createElement('div');
+      block.className = 'category-block';
+      block.innerHTML = `<h3 class="category-title">${cat.name}</h3>
+        <div class="service-grid" id="cat-${cat.id}"></div>`;
+      container.appendChild(block);
+
+      const grid = block.querySelector(`#cat-${cat.id}`);
+      for (const svc of catServices) {
+        const card = document.createElement('div');
+        card.className = 'service-card';
+        card.dataset.id = svc.id;
+        card.innerHTML = `
+          <div class="service-name">${svc.name}</div>
+          <div class="service-meta">
+            <span class="service-price">${formatPrice(svc.price)}</span>
+            <span class="service-duration">⏱ ${formatDuration(svc.duration_minutes)}</span>
+          </div>`;
+        card.addEventListener('click', () => selectService(svc));
+        grid.appendChild(card);
+      }
+    }
+  } catch (e) {
+    document.getElementById('services-container').innerHTML =
+      `<div class="msg msg-error">Error cargando servicios: ${e.message}</div>`;
+  }
+}
+
+function selectService(svc) {
+  state.selectedService = svc;
+  document.querySelectorAll('.service-card').forEach(c => c.classList.remove('selected'));
+  document.querySelector(`.service-card[data-id="${svc.id}"]`).classList.add('selected');
+  document.getElementById('btn-to-step2').disabled = false;
+}
+
+// ============================================
+// STEP 2: CALENDARIO + SLOTS
+// ============================================
+function goToStep2() {
+  goToStep(2);
+  renderCalendar();
+}
+
+function renderCalendar() {
+  const year = state.calYear;
+  const month = state.calMonth;
+  const label = new Date(year, month, 1).toLocaleDateString('es-ES', { month: 'long', year: 'numeric' });
+  document.getElementById('calendar-month-label').textContent = label.charAt(0).toUpperCase() + label.slice(1);
+
+  const grid = document.getElementById('calendar-grid');
+  grid.innerHTML = '';
+
+  // Cabeceras: L M X J V S D
+  const days = ['Lun','Mar','Mié','Jue','Vie','Sáb','Dom'];
+  days.forEach(d => {
+    const el = document.createElement('div');
+    el.className = 'cal-day-header';
+    el.textContent = d;
+    grid.appendChild(el);
+  });
+
+  const firstDay = new Date(year, month, 1);
+  const lastDay = new Date(year, month + 1, 0);
+  const today = new Date();
+  today.setHours(0,0,0,0);
+
+  // Offset: JS domingo=0, nosotros lunes=0
+  let startOffset = firstDay.getDay();
+  startOffset = startOffset === 0 ? 6 : startOffset - 1;
+
+  // Días vacíos iniciales
+  for (let i = 0; i < startOffset; i++) {
+    const el = document.createElement('div');
+    el.className = 'cal-day empty';
+    grid.appendChild(el);
+  }
+
+  for (let d = 1; d <= lastDay.getDate(); d++) {
+    const date = new Date(year, month, d);
+    const dbDay = jsDayToDbDay(date.getDay());
+    const isPast = date < today;
+    const isSunday = date.getDay() === 0;
+
+    // Comprobar si Leonor trabaja ese día de la semana
+    // (se comprueba contra horarios localmente)
+    const isToday = date.toDateString() === today.toDateString();
+    const dateStr = toLocalDateStr(date);
+
+    const el = document.createElement('div');
+    el.className = 'cal-day';
+    el.textContent = d;
+
+    if (isPast) {
+      el.classList.add('disabled');
+    } else if (isSunday) {
+      el.classList.add('disabled'); // Leonor no trabaja domingos
+    } else {
+      if (isToday) el.classList.add('today');
+      if (state.selectedDate === dateStr) el.classList.add('selected');
+      el.addEventListener('click', () => selectDate(dateStr, el));
+    }
+
+    grid.appendChild(el);
+  }
+}
+
+async function selectDate(dateStr, el) {
+  state.selectedDate = dateStr;
+  state.selectedSlot = null;
+  document.getElementById('btn-to-step3').disabled = true;
+
+  document.querySelectorAll('.cal-day').forEach(d => d.classList.remove('selected'));
+  el.classList.add('selected');
+
+  const slotsSection = document.getElementById('slots-section');
+  slotsSection.style.display = 'block';
+  document.getElementById('slots-date-title').textContent =
+    'Huecos disponibles — ' + formatDateEs(dateStr);
+  document.getElementById('slots-container').innerHTML =
+    '<div class="loading"><div class="spinner"></div> Buscando huecos…</div>';
+
+  try {
+    const slots = await getAvailableSlots(
+      state.selectedStaff.id,
+      state.selectedService.id,
+      dateStr
+    );
+
+    const container = document.getElementById('slots-container');
+    if (!slots.length) {
+      container.innerHTML = '<p class="slots-empty">No hay huecos disponibles este día. Prueba con otra fecha.</p>';
+      return;
+    }
+
+    container.innerHTML = '<div class="slots-grid" id="slots-grid"></div>';
+    const grid = document.getElementById('slots-grid');
+    slots.forEach(slot => {
+      const el = document.createElement('div');
+      el.className = 'slot';
+      el.textContent = slot;
+      el.addEventListener('click', () => selectSlot(slot, el));
+      grid.appendChild(el);
+    });
+  } catch (e) {
+    document.getElementById('slots-container').innerHTML =
+      `<div class="msg msg-error">Error: ${e.message}</div>`;
+  }
+}
+
+function selectSlot(slot, el) {
+  state.selectedSlot = slot;
+  document.querySelectorAll('.slot').forEach(s => s.classList.remove('selected'));
+  el.classList.add('selected');
+  document.getElementById('btn-to-step3').disabled = false;
+}
+
+function prevMonth() {
+  state.calMonth--;
+  if (state.calMonth < 0) { state.calMonth = 11; state.calYear--; }
+  renderCalendar();
+}
+
+function nextMonth() {
+  state.calMonth++;
+  if (state.calMonth > 11) { state.calMonth = 0; state.calYear++; }
+  renderCalendar();
+}
+
+// ============================================
+// STEP 3: DATOS Y CONFIRMAR
+// ============================================
+function goToStep3() {
+  goToStep(3);
+  renderSummary();
+}
+
+function renderSummary() {
+  const svc = state.selectedService;
+  const slot = state.selectedSlot;
+  const date = state.selectedDate;
+
+  document.getElementById('summary-box').innerHTML = `
+    <div class="summary-row">
+      <span class="summary-label">Servicio</span>
+      <span class="summary-value">${svc.name}</span>
+    </div>
+    <div class="summary-row">
+      <span class="summary-label">Fecha</span>
+      <span class="summary-value">${formatDateEs(date)}</span>
+    </div>
+    <div class="summary-row">
+      <span class="summary-label">Hora</span>
+      <span class="summary-value">${slot}h</span>
+    </div>
+    <div class="summary-row">
+      <span class="summary-label">Duración</span>
+      <span class="summary-value">${formatDuration(svc.duration_minutes)}</span>
+    </div>
+    <div class="summary-row">
+      <span class="summary-label">Precio</span>
+      <span class="summary-value summary-price">${formatPrice(svc.price)}</span>
+    </div>
+  `;
+}
+
+async function confirmBooking() {
+  const name = document.getElementById('client-name').value.trim();
+  const phone = document.getElementById('client-phone').value.trim();
+  const notes = document.getElementById('client-notes').value.trim();
+  const msgEl = document.getElementById('form-msg');
+
+  if (!name || !phone) {
+    msgEl.innerHTML = '<div class="msg msg-error">Por favor, rellena nombre y teléfono.</div>';
+    return;
+  }
+
+  const btn = document.getElementById('btn-confirm');
+  btn.disabled = true;
+  btn.textContent = 'Guardando…';
+  msgEl.innerHTML = '';
+
+  try {
+    const svc = state.selectedService;
+    const [h, m] = state.selectedSlot.split(':').map(Number);
+    const [y, mo, d] = state.selectedDate.split('-').map(Number);
+
+    const startsAt = new Date(y, mo - 1, d, h, m);
+    const endsAt = new Date(startsAt.getTime() + svc.duration_minutes * 60000);
+
+    await supabaseRequest('studio17_bookings', {
+      method: 'POST',
+      body: JSON.stringify({
+        staff_id: state.selectedStaff.id,
+        service_id: svc.id,
+        client_name: name,
+        client_phone: phone,
+        starts_at: startsAt.toISOString(),
+        ends_at: endsAt.toISOString(),
+        notes: notes || null,
+        status: 'confirmed'
+      })
+    });
+
+    // Notificación WhatsApp (abre wa.me con texto pre-rellenado)
+    sendWhatsAppNotification({ name, phone, svc, date: state.selectedDate, slot: state.selectedSlot });
+
+    document.getElementById('success-text').textContent =
+      `${name}, tu cita para "${svc.name}" está confirmada el ${formatDateEs(state.selectedDate)} a las ${state.selectedSlot}h. ¡Hasta pronto!`;
+
+    goToStep(4);
+  } catch (e) {
+    msgEl.innerHTML = `<div class="msg msg-error">Error al guardar la reserva: ${e.message}</div>`;
+    btn.disabled = false;
+    btn.textContent = 'Confirmar reserva →';
+  }
+}
+
+function sendWhatsAppNotification({ name, phone, svc, date, slot }) {
+  const text = encodeURIComponent(
+    `🌸 Nueva reserva en Studio17\n\n` +
+    `👤 Cliente: ${name}\n` +
+    `📱 Tel: ${phone}\n` +
+    `💅 Servicio: ${svc.name}\n` +
+    `📅 Fecha: ${formatDateEs(date)}\n` +
+    `⏰ Hora: ${slot}h\n` +
+    `⏱ Duración: ${formatDuration(svc.duration_minutes)}\n` +
+    `💰 Precio: ${formatPrice(svc.price)}`
+  );
+  window.open(`https://wa.me/${WHATSAPP_NUMBER}?text=${text}`, '_blank');
+}
+
+// ============================================
+// NAVEGACIÓN
+// ============================================
+function goToStep(n) {
+  [1,2,3,4].forEach(i => {
+    document.getElementById(`step-${i}`).style.display = i === n ? 'block' : 'none';
+    const ind = document.getElementById(`step-ind-${i}`);
+    if (ind) {
+      ind.classList.toggle('active', i === n);
+      ind.classList.toggle('done', i < n);
+    }
+  });
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+}
+
+function resetBooking() {
+  state.selectedService = null;
+  state.selectedDate = null;
+  state.selectedSlot = null;
+  document.querySelectorAll('.service-card').forEach(c => c.classList.remove('selected'));
+  document.getElementById('btn-to-step2').disabled = true;
+  document.getElementById('client-name').value = '';
+  document.getElementById('client-phone').value = '';
+  document.getElementById('client-notes').value = '';
+  document.getElementById('form-msg').innerHTML = '';
+  document.getElementById('slots-section').style.display = 'none';
+  const now = new Date();
+  state.calYear = now.getFullYear();
+  state.calMonth = now.getMonth();
+  goToStep(1);
+}
+</script>
+</body>
+</html>

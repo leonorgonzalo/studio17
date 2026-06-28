@@ -1,0 +1,621 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Studio17 — Panel Admin</title>
+  <link rel="stylesheet" href="../css/style.css">
+</head>
+<body>
+
+<!-- LOGIN -->
+<div id="login-screen" style="display:flex; align-items:center; justify-content:center; min-height:100vh; background:var(--brown)">
+  <div style="background:var(--ivory); padding:48px 40px; border-radius:6px; width:100%; max-width:360px; text-align:center">
+    <div style="font-family:'Cormorant Garamond',serif; font-size:32px; color:var(--brown); margin-bottom:8px; letter-spacing:3px">STUDIO<span style="color:var(--gold)">17</span></div>
+    <p style="color:var(--text-muted); font-size:13px; margin-bottom:32px">Panel de administración</p>
+    <div id="login-msg"></div>
+    <input class="form-input" type="password" id="pwd-input" placeholder="Contraseña" style="margin-bottom:12px" onkeydown="if(event.key==='Enter') doLogin()">
+    <button class="btn btn-primary" style="width:100%" onclick="doLogin()">Entrar</button>
+  </div>
+</div>
+
+<!-- ADMIN APP -->
+<div id="admin-app" style="display:none">
+  <div class="admin-layout">
+
+    <!-- SIDEBAR -->
+    <aside class="admin-sidebar">
+      <div class="admin-sidebar-logo">STUDIO<span style="color:var(--gold)">17</span></div>
+      <button class="admin-nav-item active" onclick="showSection('reservas', this)">📅 Reservas</button>
+      <button class="admin-nav-item" onclick="showSection('servicios', this)">💅 Servicios</button>
+      <button class="admin-nav-item" onclick="showSection('horarios', this)">🕐 Horarios</button>
+      <button class="admin-nav-item" onclick="showSection('bloqueos', this)">🚫 Bloqueos</button>
+      <button class="admin-nav-item" onclick="showSection('staff', this)">👥 Empleadas</button>
+      <div style="margin-top:auto; padding:20px">
+        <a href="../index.html" class="btn btn-outline btn-sm" style="width:100%; justify-content:center">← Ver web</a>
+      </div>
+    </aside>
+
+    <!-- MAIN -->
+    <main class="admin-main">
+
+      <!-- ── RESERVAS ── -->
+      <section id="sec-reservas">
+        <h1 class="admin-title">Reservas</h1>
+        <p class="admin-sub">Gestiona las citas de Studio17.</p>
+
+        <div style="display:flex; gap:12px; margin-bottom:24px; flex-wrap:wrap">
+          <input type="date" class="form-input" id="filter-date" style="width:auto" onchange="loadBookings()">
+          <select class="form-input" id="filter-status" style="width:auto" onchange="loadBookings()">
+            <option value="">Todos los estados</option>
+            <option value="confirmed">Confirmadas</option>
+            <option value="cancelled">Canceladas</option>
+          </select>
+          <button class="btn btn-dark btn-sm" onclick="document.getElementById('filter-date').value=''; loadBookings()">Limpiar</button>
+          <button class="btn btn-primary btn-sm" onclick="showAddBookingModal()">+ Nueva reserva</button>
+        </div>
+
+        <div id="bookings-container">
+          <div class="loading"><div class="spinner"></div></div>
+        </div>
+      </section>
+
+      <!-- ── SERVICIOS ── -->
+      <section id="sec-servicios" style="display:none">
+        <h1 class="admin-title">Servicios</h1>
+        <p class="admin-sub">Edita precios, duraciones y disponibilidad de servicios.</p>
+        <button class="btn btn-primary btn-sm" style="margin-bottom:24px" onclick="showServiceModal()">+ Añadir servicio</button>
+        <div id="services-admin-container">
+          <div class="loading"><div class="spinner"></div></div>
+        </div>
+      </section>
+
+      <!-- ── HORARIOS ── -->
+      <section id="sec-horarios" style="display:none">
+        <h1 class="admin-title">Horarios</h1>
+        <p class="admin-sub">Define qué días y horas trabaja cada empleada.</p>
+        <div id="schedules-container">
+          <div class="loading"><div class="spinner"></div></div>
+        </div>
+      </section>
+
+      <!-- ── BLOQUEOS ── -->
+      <section id="sec-bloqueos" style="display:none">
+        <h1 class="admin-title">Bloqueos</h1>
+        <p class="admin-sub">Bloquea fechas por vacaciones, enfermedad u otros motivos.</p>
+        <button class="btn btn-primary btn-sm" style="margin-bottom:24px" onclick="showBlockModal()">+ Añadir bloqueo</button>
+        <div id="blocks-container">
+          <div class="loading"><div class="spinner"></div></div>
+        </div>
+      </section>
+
+      <!-- ── STAFF ── -->
+      <section id="sec-staff" style="display:none">
+        <h1 class="admin-title">Empleadas</h1>
+        <p class="admin-sub">Gestiona el equipo de Studio17.</p>
+        <button class="btn btn-primary btn-sm" style="margin-bottom:24px" onclick="showStaffModal()">+ Añadir empleada</button>
+        <div id="staff-container">
+          <div class="loading"><div class="spinner"></div></div>
+        </div>
+      </section>
+
+    </main>
+  </div>
+</div>
+
+<!-- MODAL CONTAINER -->
+<div id="modal-overlay" class="modal-overlay" style="display:none" onclick="closeModal(event)">
+  <div class="modal" id="modal-box"></div>
+</div>
+
+<script src="../js/config.js"></script>
+<script src="../js/availability.js"></script>
+<script>
+// ============================================
+// LOGIN
+// ============================================
+function doLogin() {
+  const pwd = document.getElementById('pwd-input').value;
+  if (pwd === ADMIN_PASSWORD) {
+    document.getElementById('login-screen').style.display = 'none';
+    document.getElementById('admin-app').style.display = 'block';
+    initAdmin();
+  } else {
+    document.getElementById('login-msg').innerHTML =
+      '<div class="msg msg-error">Contraseña incorrecta.</div>';
+  }
+}
+
+// ============================================
+// INIT
+// ============================================
+let adminData = { staff: [], categories: [], services: [] };
+
+async function initAdmin() {
+  adminData.staff = await supabaseRequest('studio17_staff?select=*&order=id');
+  adminData.categories = await supabaseRequest('studio17_categories?select=*&order=sort_order');
+  adminData.services = await supabaseRequest('studio17_services?select=*&order=category_id,sort_order');
+  loadBookings();
+}
+
+// ============================================
+// NAVEGACIÓN SECCIONES
+// ============================================
+const sections = ['reservas', 'servicios', 'horarios', 'bloqueos', 'staff'];
+
+function showSection(name, btn) {
+  sections.forEach(s => {
+    document.getElementById(`sec-${s}`).style.display = s === name ? 'block' : 'none';
+  });
+  document.querySelectorAll('.admin-nav-item').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+
+  if (name === 'servicios') loadServicesAdmin();
+  if (name === 'horarios') loadSchedules();
+  if (name === 'bloqueos') loadBlocks();
+  if (name === 'staff') loadStaffAdmin();
+}
+
+// ============================================
+// RESERVAS
+// ============================================
+async function loadBookings() {
+  const container = document.getElementById('bookings-container');
+  container.innerHTML = '<div class="loading"><div class="spinner"></div></div>';
+
+  let query = 'studio17_bookings?select=*,studio17_services(name,duration_minutes,price),studio17_staff(name)&order=starts_at.desc';
+
+  const filterDate = document.getElementById('filter-date').value;
+  const filterStatus = document.getElementById('filter-status').value;
+
+  if (filterDate) {
+    query += `&starts_at=gte.${filterDate}T00:00:00&starts_at=lte.${filterDate}T23:59:59`;
+  }
+  if (filterStatus) {
+    query += `&status=eq.${filterStatus}`;
+  }
+
+  const bookings = await supabaseRequest(query);
+
+  if (!bookings.length) {
+    container.innerHTML = '<p style="color:var(--text-muted); padding:20px 0">No hay reservas para mostrar.</p>';
+    return;
+  }
+
+  container.innerHTML = `
+    <table class="data-table">
+      <thead>
+        <tr>
+          <th>Fecha y hora</th>
+          <th>Cliente</th>
+          <th>Teléfono</th>
+          <th>Servicio</th>
+          <th>Precio</th>
+          <th>Estado</th>
+          <th>Acciones</th>
+        </tr>
+      </thead>
+      <tbody id="bookings-tbody"></tbody>
+    </table>`;
+
+  const tbody = document.getElementById('bookings-tbody');
+  bookings.forEach(b => {
+    const date = new Date(b.starts_at);
+    const dateStr = date.toLocaleDateString('es-ES', { weekday:'short', day:'numeric', month:'short' });
+    const timeStr = date.toLocaleTimeString('es-ES', { hour:'2-digit', minute:'2-digit' });
+    const svc = b.studio17_services;
+    const staff = b.studio17_staff;
+
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td><strong>${dateStr}</strong><br><span style="color:var(--text-muted); font-size:13px">${timeStr}h · ${staff?.name || '-'}</span></td>
+      <td>${b.client_name}${b.notes ? `<br><span style="font-size:12px; color:var(--text-muted)">${b.notes}</span>` : ''}</td>
+      <td><a href="https://wa.me/34${b.client_phone.replace(/\s/g,'')}" target="_blank" style="color:var(--gold)">${b.client_phone}</a></td>
+      <td style="font-size:13px">${svc?.name || '-'}<br><span style="color:var(--text-muted)">${svc ? formatDuration(svc.duration_minutes) : ''}</span></td>
+      <td>${svc ? formatPrice(svc.price) : '-'}</td>
+      <td><span class="badge badge-${b.status}">${b.status === 'confirmed' ? 'Confirmada' : 'Cancelada'}</span></td>
+      <td>
+        ${b.status === 'confirmed' ?
+          `<button class="btn btn-sm btn-danger" onclick="cancelBooking(${b.id})">Cancelar</button>` :
+          `<button class="btn btn-sm btn-dark" onclick="deleteBooking(${b.id})">Eliminar</button>`
+        }
+      </td>`;
+    tbody.appendChild(tr);
+  });
+}
+
+async function cancelBooking(id) {
+  if (!confirm('¿Cancelar esta reserva?')) return;
+  await supabaseRequest(`studio17_bookings?id=eq.${id}`, {
+    method: 'PATCH',
+    body: JSON.stringify({ status: 'cancelled' })
+  });
+  loadBookings();
+}
+
+async function deleteBooking(id) {
+  if (!confirm('¿Eliminar esta reserva definitivamente?')) return;
+  await supabaseRequest(`studio17_bookings?id=eq.${id}`, { method: 'DELETE', prefer: 'return=minimal' });
+  loadBookings();
+}
+
+function showAddBookingModal() {
+  const staffOptions = adminData.staff.map(s => `<option value="${s.id}">${s.name}</option>`).join('');
+  const svcOptions = adminData.services.map(s => `<option value="${s.id}" data-dur="${s.duration_minutes}">${s.name} (${formatDuration(s.duration_minutes)})</option>`).join('');
+
+  document.getElementById('modal-box').innerHTML = `
+    <h2 class="modal-title">Nueva reserva</h2>
+    <div id="modal-msg"></div>
+    <div class="form-group">
+      <label class="form-label">Empleada</label>
+      <select class="form-input" id="m-staff">${staffOptions}</select>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Servicio</label>
+      <select class="form-input" id="m-service">${svcOptions}</select>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Fecha y hora inicio</label>
+      <input class="form-input" type="datetime-local" id="m-starts">
+    </div>
+    <div class="form-group">
+      <label class="form-label">Nombre cliente</label>
+      <input class="form-input" type="text" id="m-name">
+    </div>
+    <div class="form-group">
+      <label class="form-label">Teléfono</label>
+      <input class="form-input" type="tel" id="m-phone">
+    </div>
+    <div class="form-group">
+      <label class="form-label">Notas (opcional)</label>
+      <input class="form-input" type="text" id="m-notes">
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-outline" onclick="closeModal()">Cancelar</button>
+      <button class="btn btn-primary" onclick="saveManualBooking()">Guardar</button>
+    </div>`;
+  openModal();
+}
+
+async function saveManualBooking() {
+  const staffId = document.getElementById('m-staff').value;
+  const serviceId = document.getElementById('m-service').value;
+  const startsAt = document.getElementById('m-starts').value;
+  const name = document.getElementById('m-name').value.trim();
+  const phone = document.getElementById('m-phone').value.trim();
+  const notes = document.getElementById('m-notes').value.trim();
+
+  if (!startsAt || !name || !phone) {
+    document.getElementById('modal-msg').innerHTML = '<div class="msg msg-error">Rellena todos los campos obligatorios.</div>';
+    return;
+  }
+
+  const svc = adminData.services.find(s => s.id == serviceId);
+  const endsAt = new Date(new Date(startsAt).getTime() + svc.duration_minutes * 60000);
+
+  await supabaseRequest('studio17_bookings', {
+    method: 'POST',
+    body: JSON.stringify({ staff_id: Number(staffId), service_id: Number(serviceId), client_name: name, client_phone: phone, starts_at: new Date(startsAt).toISOString(), ends_at: endsAt.toISOString(), notes: notes || null, status: 'confirmed' })
+  });
+  closeModal();
+  loadBookings();
+}
+
+// ============================================
+// SERVICIOS ADMIN
+// ============================================
+async function loadServicesAdmin() {
+  adminData.services = await supabaseRequest('studio17_services?select=*,studio17_categories(name)&order=category_id,sort_order');
+  const container = document.getElementById('services-admin-container');
+
+  const catMap = {};
+  adminData.services.forEach(s => {
+    const catName = s.studio17_categories?.name || 'Sin categoría';
+    if (!catMap[catName]) catMap[catName] = [];
+    catMap[catName].push(s);
+  });
+
+  let html = '';
+  for (const [cat, svcs] of Object.entries(catMap)) {
+    html += `<div style="margin-bottom:32px">
+      <h3 style="font-family:'Cormorant Garamond',serif; font-size:20px; color:var(--brown-mid); margin-bottom:12px; padding-bottom:6px; border-bottom:1px solid var(--border)">${cat}</h3>
+      <table class="data-table">
+        <thead><tr><th>Servicio</th><th>Duración</th><th>Precio</th><th>Estado</th><th>Acciones</th></tr></thead>
+        <tbody>
+          ${svcs.map(s => `
+            <tr>
+              <td>${s.name}</td>
+              <td>${formatDuration(s.duration_minutes)}</td>
+              <td>${formatPrice(s.price)}</td>
+              <td><span class="badge" style="${s.active ? 'background:#DCFCE7;color:#166534' : 'background:#FEE2E2;color:#991B1B'}">${s.active ? 'Activo' : 'Oculto'}</span></td>
+              <td style="display:flex; gap:6px">
+                <button class="btn btn-sm btn-dark" onclick='showServiceModal(${JSON.stringify(s)})'>Editar</button>
+                <button class="btn btn-sm btn-danger" onclick="toggleService(${s.id}, ${s.active})">${s.active ? 'Ocultar' : 'Activar'}</button>
+              </td>
+            </tr>`).join('')}
+        </tbody>
+      </table>
+    </div>`;
+  }
+  container.innerHTML = html;
+}
+
+async function toggleService(id, active) {
+  await supabaseRequest(`studio17_services?id=eq.${id}`, {
+    method: 'PATCH',
+    body: JSON.stringify({ active: !active })
+  });
+  loadServicesAdmin();
+}
+
+function showServiceModal(svc = null) {
+  const catOptions = adminData.categories.map(c =>
+    `<option value="${c.id}" ${svc && svc.category_id === c.id ? 'selected' : ''}>${c.name}</option>`
+  ).join('');
+
+  document.getElementById('modal-box').innerHTML = `
+    <h2 class="modal-title">${svc ? 'Editar servicio' : 'Nuevo servicio'}</h2>
+    <div id="modal-msg"></div>
+    <div class="form-group">
+      <label class="form-label">Categoría</label>
+      <select class="form-input" id="m-cat">${catOptions}</select>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Nombre del servicio</label>
+      <input class="form-input" type="text" id="m-sname" value="${svc ? svc.name : ''}">
+    </div>
+    <div class="form-group">
+      <label class="form-label">Duración (minutos)</label>
+      <input class="form-input" type="number" id="m-dur" value="${svc ? svc.duration_minutes : '30'}" min="5" step="5">
+    </div>
+    <div class="form-group">
+      <label class="form-label">Precio (€)</label>
+      <input class="form-input" type="number" id="m-price" value="${svc ? svc.price : ''}" min="0" step="0.05">
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-outline" onclick="closeModal()">Cancelar</button>
+      <button class="btn btn-primary" onclick="saveService(${svc ? svc.id : 'null'})">Guardar</button>
+    </div>`;
+  openModal();
+}
+
+async function saveService(id) {
+  const cat = document.getElementById('m-cat').value;
+  const name = document.getElementById('m-sname').value.trim();
+  const dur = parseInt(document.getElementById('m-dur').value);
+  const price = parseFloat(document.getElementById('m-price').value);
+
+  if (!name || !dur || isNaN(price)) {
+    document.getElementById('modal-msg').innerHTML = '<div class="msg msg-error">Rellena todos los campos.</div>';
+    return;
+  }
+
+  const body = { category_id: Number(cat), name, duration_minutes: dur, price };
+
+  if (id) {
+    await supabaseRequest(`studio17_services?id=eq.${id}`, { method: 'PATCH', body: JSON.stringify(body) });
+  } else {
+    await supabaseRequest('studio17_services', { method: 'POST', body: JSON.stringify({ ...body, active: true }) });
+  }
+  closeModal();
+  loadServicesAdmin();
+}
+
+// ============================================
+// HORARIOS
+// ============================================
+const DAY_NAMES = ['Lunes','Martes','Miércoles','Jueves','Viernes','Sábado','Domingo'];
+
+async function loadSchedules() {
+  const schedules = await supabaseRequest('studio17_schedules?select=*&order=staff_id,day_of_week');
+  const container = document.getElementById('schedules-container');
+
+  let html = '';
+  for (const staffMember of adminData.staff) {
+    const staffSchedules = schedules.filter(s => s.staff_id === staffMember.id);
+    html += `
+      <div style="margin-bottom:32px">
+        <h3 style="font-size:22px; color:var(--brown); margin-bottom:16px; font-family:'Cormorant Garamond',serif">${staffMember.name}</h3>
+        <table class="data-table" style="margin-bottom:12px">
+          <thead><tr><th>Día</th><th>Entrada</th><th>Salida</th><th>Acciones</th></tr></thead>
+          <tbody id="sched-tbody-${staffMember.id}">
+            ${DAY_NAMES.map((day, i) => {
+              const sched = staffSchedules.find(s => s.day_of_week === i);
+              if (sched) return `
+                <tr>
+                  <td>${day}</td>
+                  <td><input class="form-input" type="time" id="start-${sched.id}" value="${sched.start_time}" style="width:auto"></td>
+                  <td><input class="form-input" type="time" id="end-${sched.id}" value="${sched.end_time}" style="width:auto"></td>
+                  <td style="display:flex; gap:6px">
+                    <button class="btn btn-sm btn-dark" onclick="updateSchedule(${sched.id})">Guardar</button>
+                    <button class="btn btn-sm btn-danger" onclick="deleteSchedule(${sched.id})">Eliminar</button>
+                  </td>
+                </tr>`;
+              return `
+                <tr>
+                  <td>${day}</td>
+                  <td colspan="2" style="color:var(--text-muted); font-size:13px">No trabaja</td>
+                  <td><button class="btn btn-sm btn-dark" onclick="addScheduleDay(${staffMember.id}, ${i})">+ Añadir</button></td>
+                </tr>`;
+            }).join('')}
+          </tbody>
+        </table>
+      </div>`;
+  }
+  container.innerHTML = html;
+}
+
+async function updateSchedule(id) {
+  const start = document.getElementById(`start-${id}`).value;
+  const end = document.getElementById(`end-${id}`).value;
+  await supabaseRequest(`studio17_schedules?id=eq.${id}`, {
+    method: 'PATCH',
+    body: JSON.stringify({ start_time: start, end_time: end })
+  });
+  alert('Horario actualizado.');
+}
+
+async function deleteSchedule(id) {
+  if (!confirm('¿Eliminar este horario?')) return;
+  await supabaseRequest(`studio17_schedules?id=eq.${id}`, { method: 'DELETE', prefer: 'return=minimal' });
+  loadSchedules();
+}
+
+async function addScheduleDay(staffId, day) {
+  await supabaseRequest('studio17_schedules', {
+    method: 'POST',
+    body: JSON.stringify({ staff_id: staffId, day_of_week: day, start_time: '10:00', end_time: '19:00' })
+  });
+  loadSchedules();
+}
+
+// ============================================
+// BLOQUEOS
+// ============================================
+async function loadBlocks() {
+  const blocks = await supabaseRequest('studio17_blocked_slots?select=*,studio17_staff(name)&order=starts_at.desc');
+  const container = document.getElementById('blocks-container');
+
+  if (!blocks.length) {
+    container.innerHTML = '<p style="color:var(--text-muted)">No hay bloqueos activos.</p>';
+    return;
+  }
+
+  container.innerHTML = `
+    <table class="data-table">
+      <thead><tr><th>Empleada</th><th>Desde</th><th>Hasta</th><th>Motivo</th><th></th></tr></thead>
+      <tbody>
+        ${blocks.map(b => `
+          <tr>
+            <td>${b.studio17_staff?.name || '-'}</td>
+            <td>${new Date(b.starts_at).toLocaleString('es-ES', { dateStyle:'short', timeStyle:'short' })}</td>
+            <td>${new Date(b.ends_at).toLocaleString('es-ES', { dateStyle:'short', timeStyle:'short' })}</td>
+            <td>${b.reason || '-'}</td>
+            <td><button class="btn btn-sm btn-danger" onclick="deleteBlock(${b.id})">Eliminar</button></td>
+          </tr>`).join('')}
+      </tbody>
+    </table>`;
+}
+
+function showBlockModal() {
+  const staffOptions = adminData.staff.map(s => `<option value="${s.id}">${s.name}</option>`).join('');
+  document.getElementById('modal-box').innerHTML = `
+    <h2 class="modal-title">Añadir bloqueo</h2>
+    <div id="modal-msg"></div>
+    <div class="form-group">
+      <label class="form-label">Empleada</label>
+      <select class="form-input" id="m-bstaff">${staffOptions}</select>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Desde</label>
+      <input class="form-input" type="datetime-local" id="m-bstart">
+    </div>
+    <div class="form-group">
+      <label class="form-label">Hasta</label>
+      <input class="form-input" type="datetime-local" id="m-bend">
+    </div>
+    <div class="form-group">
+      <label class="form-label">Motivo (opcional)</label>
+      <input class="form-input" type="text" id="m-breason" placeholder="Vacaciones, baja, etc.">
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-outline" onclick="closeModal()">Cancelar</button>
+      <button class="btn btn-primary" onclick="saveBlock()">Guardar</button>
+    </div>`;
+  openModal();
+}
+
+async function saveBlock() {
+  const staffId = document.getElementById('m-bstaff').value;
+  const start = document.getElementById('m-bstart').value;
+  const end = document.getElementById('m-bend').value;
+  const reason = document.getElementById('m-breason').value.trim();
+
+  if (!start || !end) {
+    document.getElementById('modal-msg').innerHTML = '<div class="msg msg-error">Indica fechas de inicio y fin.</div>';
+    return;
+  }
+
+  await supabaseRequest('studio17_blocked_slots', {
+    method: 'POST',
+    body: JSON.stringify({ staff_id: Number(staffId), starts_at: new Date(start).toISOString(), ends_at: new Date(end).toISOString(), reason: reason || null })
+  });
+  closeModal();
+  loadBlocks();
+}
+
+async function deleteBlock(id) {
+  if (!confirm('¿Eliminar este bloqueo?')) return;
+  await supabaseRequest(`studio17_blocked_slots?id=eq.${id}`, { method: 'DELETE', prefer: 'return=minimal' });
+  loadBlocks();
+}
+
+// ============================================
+// STAFF ADMIN
+// ============================================
+async function loadStaffAdmin() {
+  adminData.staff = await supabaseRequest('studio17_staff?select=*&order=id');
+  const container = document.getElementById('staff-container');
+  container.innerHTML = `
+    <table class="data-table">
+      <thead><tr><th>Nombre</th><th>Estado</th><th>Acciones</th></tr></thead>
+      <tbody>
+        ${adminData.staff.map(s => `
+          <tr>
+            <td>${s.name}</td>
+            <td><span class="badge" style="${s.active ? 'background:#DCFCE7;color:#166534' : 'background:#FEE2E2;color:#991B1B'}">${s.active ? 'Activa' : 'Inactiva'}</span></td>
+            <td style="display:flex; gap:6px">
+              <button class="btn btn-sm btn-dark" onclick="showStaffModal(${JSON.stringify(s)})">Editar</button>
+              <button class="btn btn-sm btn-danger" onclick="toggleStaff(${s.id}, ${s.active})">${s.active ? 'Desactivar' : 'Activar'}</button>
+            </td>
+          </tr>`).join('')}
+      </tbody>
+    </table>`;
+}
+
+function showStaffModal(staffMember = null) {
+  document.getElementById('modal-box').innerHTML = `
+    <h2 class="modal-title">${staffMember ? 'Editar empleada' : 'Nueva empleada'}</h2>
+    <div id="modal-msg"></div>
+    <div class="form-group">
+      <label class="form-label">Nombre</label>
+      <input class="form-input" type="text" id="m-sname2" value="${staffMember ? staffMember.name : ''}">
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-outline" onclick="closeModal()">Cancelar</button>
+      <button class="btn btn-primary" onclick="saveStaff(${staffMember ? staffMember.id : 'null'})">Guardar</button>
+    </div>`;
+  openModal();
+}
+
+async function saveStaff(id) {
+  const name = document.getElementById('m-sname2').value.trim();
+  if (!name) return;
+  if (id) {
+    await supabaseRequest(`studio17_staff?id=eq.${id}`, { method: 'PATCH', body: JSON.stringify({ name }) });
+  } else {
+    await supabaseRequest('studio17_staff', { method: 'POST', body: JSON.stringify({ name, active: true }) });
+  }
+  closeModal();
+  loadStaffAdmin();
+}
+
+async function toggleStaff(id, active) {
+  await supabaseRequest(`studio17_staff?id=eq.${id}`, { method: 'PATCH', body: JSON.stringify({ active: !active }) });
+  loadStaffAdmin();
+}
+
+// ============================================
+// MODAL
+// ============================================
+function openModal() {
+  document.getElementById('modal-overlay').style.display = 'flex';
+}
+function closeModal(e) {
+  if (!e || e.target === document.getElementById('modal-overlay')) {
+    document.getElementById('modal-overlay').style.display = 'none';
+  }
+}
+</script>
+</body>
+</html>
